@@ -6,7 +6,7 @@ from datetime import datetime
 # ---------------------------------------------------------
 # 1. 과목 및 설정 (새 과목을 만드실 때 이 부분만 수정하세요)
 # ---------------------------------------------------------
-SUBJECT_NAME = "행동재무학 퀴즈"  # 과목 제목
+SUBJECT_NAME = "소비자재무설계1_002 퀴즈"  # 과목 제목
 CURRENT_WEEK = "1주차"          # 해당 주차
 ADMIN_PASSWORD = "3383"         # 선생님용 비밀번호
 
@@ -83,7 +83,7 @@ with tab1:
                 ans = st.text_input(f"{i+1}번 답안", key=f"q{i}")
                 user_responses.append(ans)
 
-            submitted = st.form_submit_button(f"답안 제출하고 확인받기 (총 {NUM_QUESTIONS}문항)")
+            submitted = st.form_submit_button(f"답안 제출하고 확인받기 (기기당 답안 제출은 1회만 가능하니, 신중하게 검토하고 버튼 누르세요)")
 
             if submitted:
                 if not name or not student_id:
@@ -166,4 +166,5 @@ with tab3:
         except:
             st.error("데이터 로드 실패")
     elif admin_pw != "":
+
         st.error("비밀번호 불일치")
