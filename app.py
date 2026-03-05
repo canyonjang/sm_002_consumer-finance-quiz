@@ -125,7 +125,7 @@ with tab1:
 # --- [TAB 2] 수동 새로고침 명단 (API 할당량 관리용) ---
 with tab2:
     st.subheader(f"📍 {CURRENT_WEEK} 제출 완료 명단")
-    st.info("자동 새로고침이 꺼져 있습니다. 명단을 확인하려면 아래 버튼을 누르세요.")
+    st.info("명단을 확인하려면 아래 버튼을 누르세요.")
     
     if st.button("🔄 명단 새로고침 (클릭)"):
         try:
@@ -164,4 +164,5 @@ with tab3:
             st.error("데이터 로드 실패")
     elif admin_pw != "":
         st.error("비밀번호 불일치")
+
 
