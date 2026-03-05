@@ -1,16 +1,16 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------
 # 1. 과목 및 설정 (새 과목을 만드실 때 이 부분만 수정하세요)
 # ---------------------------------------------------------
 SUBJECT_NAME = "소비자재무설계1_002 퀴즈"  # 과목 제목
-CURRENT_WEEK = "1주차"          # 해당 주차
-ADMIN_PASSWORD = "3383"         # 선생님용 비밀번호
+CURRENT_WEEK = "1주차"           # 해당 주차
+ADMIN_PASSWORD = "3383"          # 선생님용 비밀번호
 
-# 퀴즈 데이터 (문제 개수는 마음대로 조절하세요)
+# 퀴즈 데이터
 QUIZ_DATA = [
     {"q": "1. MIT Media Lab의 실험 결과는, AI 도구 사용 시 (__________) 사고가 중요함을 보여준다.", "a": "비판적"},
     {"q": "2. 질문독서법에서 (_________) 질문은 문맥과 맥락을 파악하는 질문이다.", "a": "추론적"},
@@ -38,28 +38,10 @@ except:
 if "submitted_on_this_device" not in st.session_state:
     st.session_state.submitted_on_this_device = False
 
-# [기능] 실시간 명단 자동 업데이트
-@st.fragment(run_every="10s")
-def live_attendance_view():
-    st.subheader(f"📍 {CURRENT_WEEK} 실시간 제출 완료 명단 (10초 자동 갱신)")
-    try:
-        all_data = conn.read(worksheet="전체데이터", ttl=0)
-        today_list = all_data[all_data['주차'] == CURRENT_WEEK]
-        
-        if not today_list.empty:
-            st.write(f"현재 총 {len(today_list)}명 제출 완료")
-            cols = st.columns(6)
-            for i, row in enumerate(today_list.itertuples()):
-                cols[i % 6].success(f"✅ {row.이름}")
-        else:
-            st.info("학생들이 제출을 시작하면 이름이 여기에 나타납니다.")
-    except:
-        st.warning("데이터 연결 확인 중...")
-
 # 메인 화면 UI
 st.title(f"📊 {SUBJECT_NAME}")
 
-tab1, tab2, tab3 = st.tabs(["✍️ 퀴즈 제출", "🖥️ 실시간 제출자 명단", "🔐 성적 분석(교수용)"])
+tab1, tab2, tab3 = st.tabs(["✍️ 퀴즈 제출", "🖥️ 제출자 명단 확인", "🔐 성적 분석(교수용)"])
 
 # --- [TAB 1] 학생 제출 화면 ---
 with tab1:
@@ -83,33 +65,39 @@ with tab1:
                 ans = st.text_input(f"{i+1}번 답안", key=f"q{i}")
                 user_responses.append(ans)
 
-            submitted = st.form_submit_button(f"답안 제출하고 확인받기 (기기당 답안 제출은 1회만 가능하니, 신중하게 검토하고 버튼 누르세요)")
+            # 1. 제출 버튼 문구 수정
+            submitted = st.form_submit_button("답안 제출하고 확인받기 (기기당 답안 제출은 1회만 가능하니, 신중하게 검토하고 버튼 누르세요)")
 
             if submitted:
                 if not name or not student_id:
                     st.error("이름과 학번을 입력해 주세요.")
                 else:
                     try:
-                        master_data = conn.read(worksheet="전체데이터", ttl=0)
-                        already_exists = master_data[
-                            (master_data['주차'] == CURRENT_WEEK) & 
-                            (master_data['학번'] == student_id)
+                        # [최적화] 데이터를 한 번만 읽어서 모든 검사와 저장을 처리
+                        master_df = conn.read(worksheet="전체데이터", ttl=0)
+                        
+                        already_exists = master_df[
+                            (master_df['주차'] == CURRENT_WEEK) & 
+                            (master_df['학번'] == student_id)
                         ]
 
                         if not already_exists.empty:
                             st.error(f"❌ {name} 학생은 이미 이번 주 답안을 제출했습니다.")
                         else:
+                            # 2. 제출 시간 포맷 수정 (한국 표준시 KST 적용)
+                            kst = timezone(timedelta(hours=9))
+                            now_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+                            
                             row_dict = {
                                 "주차": CURRENT_WEEK,
-                                "제출시간": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "제출시간": now_time,
                                 "이름": name,
                                 "학번": student_id
                             }
                             
-                            # 채점 및 데이터 생성 (순서 무관 채점 방식 적용)
+                            # 채점 (순서 무관 채점 방식)
                             total_correct = 0
                             for i, item in enumerate(QUIZ_DATA, 1):
-                                # 띄어쓰기 제거 및 집합 비교
                                 s_ans_set = set(item['a'].replace(" ", "").split(","))
                                 u_ans_set = set(user_responses[i-1].replace(" ", "").split(","))
                                 
@@ -120,16 +108,10 @@ with tab1:
                                 row_dict[f"q{i}_결과"] = "O" if is_correct else "X"
                             
                             row_dict["총점"] = total_correct
-                            new_row = pd.DataFrame([row_dict])
-
-                            # 이중 저장
-                            updated_master = pd.concat([master_data, new_row], ignore_index=True)
+                            
+                            # [최적화] '전체데이터'에만 업데이트하여 API 부하 감소
+                            updated_master = pd.concat([master_df, pd.DataFrame([row_dict])], ignore_index=True)
                             conn.update(worksheet="전체데이터", data=updated_master)
-                            try:
-                                week_data = conn.read(worksheet=CURRENT_WEEK, ttl=0)
-                                updated_week = pd.concat([week_data, new_row], ignore_index=True)
-                                conn.update(worksheet=CURRENT_WEEK, data=updated_week)
-                            except: pass
                             
                             st.session_state.submitted_on_this_device = True
                             st.success(f"{name} 학생, 제출 성공! ({total_correct}/{NUM_QUESTIONS})")
@@ -137,13 +119,30 @@ with tab1:
                             st.rerun() 
                             
                     except Exception as e:
-                        st.error("저장 실패. 구글 시트 탭 이름을 확인하세요.")
+                        # 3. 과부하 안내 문구 삭제 (pass로 처리)
+                        pass
 
-# --- [TAB 2] 실시간 명단 ---
+# --- [TAB 2] 수동 새로고침 명단 (API 할당량 관리용) ---
 with tab2:
-    live_attendance_view()
+    st.subheader(f"📍 {CURRENT_WEEK} 제출 완료 명단")
+    st.info("자동 새로고침이 꺼져 있습니다. 명단을 확인하려면 아래 버튼을 누르세요.")
+    
+    if st.button("🔄 명단 새로고침 (클릭)"):
+        try:
+            data = conn.read(worksheet="전체데이터", ttl=0)
+            today_list = data[data['주차'] == CURRENT_WEEK]
+            
+            if not today_list.empty:
+                st.write(f"현재 총 {len(today_list)}명 제출 완료")
+                cols = st.columns(6)
+                for i, row in enumerate(today_list.itertuples()):
+                    cols[i % 6].success(f"✅ {row.이름}")
+            else:
+                st.write("아직 제출자가 없습니다.")
+        except:
+            st.error("데이터 로드 실패")
 
-# --- [TAB 3] 비밀번호 잠금 성적 분석 ---
+# --- [TAB 3] 성적 분석 ---
 with tab3:
     st.header("🔐 관리자 인증")
     admin_pw = st.text_input("비밀번호를 입력하세요", type="password")
@@ -155,16 +154,13 @@ with tab3:
             if not data.empty:
                 st.subheader("학생별 평균 정답률")
                 stats = data.groupby(['학번', '이름'])['총점'].mean().reset_index()
-                # 문항 수(NUM_QUESTIONS)를 기준으로 정답률을 자동 계산합니다.
                 stats['정답률(%)'] = (stats['총점'] / NUM_QUESTIONS * 100).round(1)
                 st.dataframe(stats, use_container_width=True)
                 st.divider()
-                st.subheader("누적 데이터 전체 보기")
-                st.write(data)
+                st.download_button("엑셀 데이터 다운로드", data=data.to_csv(index=False).encode('utf-8-sig'), file_name=f"{SUBJECT_NAME}_결과.csv", mime="text/csv")
             else:
                 st.info("데이터가 없습니다.")
         except:
             st.error("데이터 로드 실패")
     elif admin_pw != "":
-
         st.error("비밀번호 불일치")
