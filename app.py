@@ -4,11 +4,11 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------
-# 1. 과목 및 설정 (새 과목을 만드실 때 이 부분만 수정하세요)
+# 1. 과목 및 설정 (분반 002용으로 설정됨)
 # ---------------------------------------------------------
-SUBJECT_NAME = "소비자재무설계1_002 퀴즈"  # 과목 제목
-CURRENT_WEEK = "2주차"           # 해당 주차
-ADMIN_PASSWORD = "3383"          # 선생님용 비밀번호
+SUBJECT_NAME = "소비자재무설계1_002 퀴즈"
+CURRENT_WEEK = "2주차"
+ADMIN_PASSWORD = "3383"
 
 # 퀴즈 데이터
 QUIZ_DATA = [
@@ -20,10 +20,7 @@ QUIZ_DATA = [
     {"q": "6. 개인재무관리의 영역은 재무설계, 재무상당, 재무교육 등인데, 이들의 공동목표는 소비자의 (______________________) 증진이다.", "a": "재무적 복지"},
     {"q": "7. 경제적 복지의 4가지 유형 중에서, 객관적 조건은 좋은데, 주관적 평가가 불만족인 유형은?", "a": "주관적 불만형"}
 ]
-
-# 문항 수를 자동으로 계산합니다.
-NUM_QUESTIONS = len(QUIZ_DATA) 
-# ---------------------------------------------------------
+NUM_QUESTIONS = len(QUIZ_DATA)
 
 # 페이지 설정
 st.set_page_config(page_title=f"{SUBJECT_NAME}", layout="wide")
@@ -34,11 +31,9 @@ try:
 except:
     st.error("구글 시트 연결 설정(Secrets)이 필요합니다.")
 
-# [세션 상태] 기기별 제출 여부 메모리
 if "submitted_on_this_device" not in st.session_state:
     st.session_state.submitted_on_this_device = False
 
-# 메인 화면 UI
 st.title(f"📊 {SUBJECT_NAME}")
 
 tab1, tab2, tab3 = st.tabs(["✍️ 퀴즈 제출", "🖥️ 제출자 명단 확인", "🔐 성적 분석(교수용)"])
@@ -48,7 +43,7 @@ with tab1:
     st.header("답안지")
     
     if st.session_state.submitted_on_this_device:
-        st.warning("⚠️ 이 기기에서 제출이 완료되었습니다. 응시는 더 이상 불가능합니다.")
+        st.warning("⚠️ 이 기기에서 제출이 완료되었습니다.")
     else:
         with st.form("quiz_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -65,73 +60,54 @@ with tab1:
                 ans = st.text_input(f"{i+1}번 답안", key=f"q{i}")
                 user_responses.append(ans)
 
-            # 1. 제출 버튼 문구 수정
-            submitted = st.form_submit_button("답안 제출하고 확인받기 (기기당 답안 제출은 1회만 가능하니, 신중하게 검토하고 버튼 누르세요)")
+            submitted = st.form_submit_button("답안 제출하기")
 
             if submitted:
                 if not name or not student_id:
                     st.error("이름과 학번을 입력해 주세요.")
                 else:
                     try:
-                        # [최적화] 데이터를 한 번만 읽어서 모든 검사와 저장을 처리
+                        # 제출 시 중복 확인을 위해 실시간 데이터 읽기
                         master_df = conn.read(worksheet="전체데이터", ttl=0)
-                        
-                        already_exists = master_df[
-                            (master_df['주차'] == CURRENT_WEEK) & 
-                            (master_df['학번'] == student_id)
-                        ]
+                        already_exists = master_df[(master_df['주차'] == CURRENT_WEEK) & (master_df['학번'] == student_id)]
 
                         if not already_exists.empty:
-                            st.error(f"❌ {name} 학생은 이미 이번 주 답안을 제출했습니다.")
+                            st.error(f"❌ {name} 학생은 이미 제출했습니다.")
                         else:
-                            # 2. 제출 시간 포맷 수정 (한국 표준시 KST 적용)
                             kst = timezone(timedelta(hours=9))
                             now_time = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
+                            row_dict = {"주차": CURRENT_WEEK, "제출시간": now_time, "이름": name, "학번": student_id}
                             
-                            row_dict = {
-                                "주차": CURRENT_WEEK,
-                                "제출시간": now_time,
-                                "이름": name,
-                                "학번": student_id
-                            }
-                            
-                            # 채점 (순서 무관 채점 방식)
                             total_correct = 0
                             for i, item in enumerate(QUIZ_DATA, 1):
-                                s_ans_set = set(item['a'].replace(" ", "").split(","))
-                                u_ans_set = set(user_responses[i-1].replace(" ", "").split(","))
+                                # [수정] 영어 대소문자 무시 비교 (.lower() 적용)
+                                s_ans_set = set(item['a'].replace(" ", "").lower().split(","))
+                                u_ans_set = set(user_responses[i-1].replace(" ", "").lower().split(","))
                                 
                                 is_correct = (s_ans_set == u_ans_set)
                                 if is_correct: total_correct += 1
-                                
                                 row_dict[f"q{i}_답"] = user_responses[i-1]
                                 row_dict[f"q{i}_결과"] = "O" if is_correct else "X"
                             
                             row_dict["총점"] = total_correct
-                            
-                            # [최적화] '전체데이터'에만 업데이트하여 API 부하 감소
                             updated_master = pd.concat([master_df, pd.DataFrame([row_dict])], ignore_index=True)
                             conn.update(worksheet="전체데이터", data=updated_master)
                             
                             st.session_state.submitted_on_this_device = True
                             st.success(f"{name} 학생, 제출 성공! ({total_correct}/{NUM_QUESTIONS})")
-                            st.balloons()
+                            # st.balloons() # 트래픽 최적화를 위해 제외
                             st.rerun() 
-                            
                     except Exception as e:
-                        # 3. 과부하 안내 문구 삭제 (pass로 처리)
-                        pass
+                        st.error("데이터 처리 중 오류가 발생했습니다.")
 
-# --- [TAB 2] 수동 새로고침 명단 (API 할당량 관리용) ---
+# --- [TAB 2] 제출 명단 확인 (트래픽 최적화 적용) ---
 with tab2:
     st.subheader(f"📍 {CURRENT_WEEK} 제출 완료 명단")
-    st.info("명단을 확인하려면 아래 버튼을 누르세요.")
-    
-    if st.button("🔄 명단 새로고침 (클릭)"):
+    if st.button("🔄 명단 확인/새로고침"):
         try:
-            data = conn.read(worksheet="전체데이터", ttl=0)
+            # 트래픽 부하 감소를 위해 5분 캐시(ttl=300) 적용
+            data = conn.read(worksheet="전체데이터", ttl=300)
             today_list = data[data['주차'] == CURRENT_WEEK]
-            
             if not today_list.empty:
                 st.write(f"현재 총 {len(today_list)}명 제출 완료")
                 cols = st.columns(6)
@@ -146,9 +122,7 @@ with tab2:
 with tab3:
     st.header("🔐 관리자 인증")
     admin_pw = st.text_input("비밀번호를 입력하세요", type="password")
-    
     if admin_pw == ADMIN_PASSWORD:
-        st.success("인증 성공")
         try:
             data = conn.read(worksheet="전체데이터", ttl=0)
             if not data.empty:
@@ -156,14 +130,8 @@ with tab3:
                 stats = data.groupby(['학번', '이름'])['총점'].mean().reset_index()
                 stats['정답률(%)'] = (stats['총점'] / NUM_QUESTIONS * 100).round(1)
                 st.dataframe(stats, use_container_width=True)
-                st.divider()
-                st.download_button("엑셀 데이터 다운로드", data=data.to_csv(index=False).encode('utf-8-sig'), file_name=f"{SUBJECT_NAME}_결과.csv", mime="text/csv")
-            else:
-                st.info("데이터가 없습니다.")
+                st.download_button("엑셀 다운로드", data=data.to_csv(index=False).encode('utf-8-sig'), file_name=f"{SUBJECT_NAME}_결과.csv", mime="text/csv")
         except:
             st.error("데이터 로드 실패")
     elif admin_pw != "":
         st.error("비밀번호 불일치")
-
-
-
